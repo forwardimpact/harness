@@ -43,6 +43,37 @@ Claude Agent SDK. Handles trace capture, splitting, and artifact upload.
 
 \*Exactly one of `task-text` or `task-file` is required.
 
+## Outputs
+
+| Output       | Description                                                                                                                                    |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trace-dir`  | Absolute path of the mktemp directory holding the run's trace files (empty when `trace: false`).                                               |
+| `trace-file` | Absolute path of the raw NDJSON trace (`<trace-dir>/trace--<case>.raw.ndjson`); wraps each event in `{source, seq, event}`.                    |
+| `case`       | Effective case identifier (after resolving `case` / legacy `artifact-suffix`).                                                                 |
+
+Downstream steps can read the raw trace directly — e.g. to extract the
+orchestrator summary and POST it to an external caller:
+
+```yaml
+- id: assess
+  uses: forwardimpact/fit-eval@v1
+  with:
+    mode: facilitate
+    task-text: "…"
+    facilitator-profile: release-engineer
+    agent-profiles: product-manager,security-engineer,staff-engineer
+
+- name: Deliver callback
+  if: steps.assess.outputs.trace-file != ''
+  env:
+    TRACE_FILE: ${{ steps.assess.outputs.trace-file }}
+  run: |
+    node libraries/libeval/bin/fit-eval.js callback \
+      --trace-file="$TRACE_FILE" \
+      --callback-url="$CALLBACK_URL" \
+      --correlation-id="$CORRELATION_ID"
+```
+
 ## Trace Artifacts
 
 When `trace` is enabled, the action uploads one artifact per run named

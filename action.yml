@@ -82,6 +82,27 @@ inputs:
     required: false
     default: ""
 
+outputs:
+  trace-dir:
+    description: |
+      Absolute path of the mktemp directory holding all trace files for this
+      run (empty when `trace` is disabled). Use this to read or post-process
+      the raw or split trace files from subsequent workflow steps without
+      globbing `/tmp`.
+    value: ${{ steps.setup.outputs.trace-dir }}
+  trace-file:
+    description: |
+      Absolute path of the raw NDJSON trace file
+      (`<trace-dir>/trace--<case>.raw.ndjson`). Empty when `trace` is
+      disabled. Wraps each agent/supervisor/facilitator/orchestrator event
+      in `{source, seq, event}` envelopes; downstream tooling that needs
+      the structured envelope (e.g. extracting the orchestrator summary)
+      should read this path directly.
+    value: ${{ steps.setup.outputs.trace-file }}
+  case:
+    description: Effective case identifier (after resolving `case` / legacy `artifact-suffix`).
+    value: ${{ steps.setup.outputs.case }}
+
 runs:
   using: composite
   steps:
@@ -107,6 +128,10 @@ runs:
           EFFECTIVE_CASE="default"
         fi
         echo "case=$EFFECTIVE_CASE" >> "$GITHUB_OUTPUT"
+        # Publish the raw trace file path so downstream steps can read it
+        # without globbing /tmp. Kept in sync with the --output path passed
+        # to the CLI in the "Run fit-eval" step below.
+        echo "trace-file=$TRACE_DIR/trace--$EFFECTIVE_CASE.raw.ndjson" >> "$GITHUB_OUTPUT"
 
     - name: Run fit-eval
       shell: bash
