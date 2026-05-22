@@ -24,32 +24,72 @@ Claude Agent SDK. Handles trace capture, splitting, and artifact upload.
 
 ## Inputs
 
-| Input                 | Required | Default               | Description                              |
-| --------------------- | -------- | --------------------- | ---------------------------------------- |
-| `task-text`           | Yes\*    | —                     | Inline task text                         |
-| `task-file`           | Yes\*    | —                     | Path to task file                        |
-| `mode`                | No       | `run`                 | `run`, `supervise`, or `facilitate`      |
-| `model`               | No       | `claude-opus-4-7[1m]` | Claude model                             |
-| `max-turns`           | No       | `200`                 | Max turns (0 = unlimited)                |
-| `agent-profile`       | No       | —                     | Agent profile name                       |
-| `facilitator-profile` | No       | —                     | Facilitator profile (facilitate mode)    |
-| `agent-profiles`      | No       | —                     | Comma-separated agents (facilitate mode) |
-| `supervisor-profile`  | No       | —                     | Supervisor profile (supervise mode)      |
-| `allowed-tools`       | No       | `Bash,Read,...`       | Comma-separated tool list                |
-| `task-amend`          | No       | —                     | Text appended to the task                |
-| `trace`               | No       | `true`                | Enable trace capture                     |
-| `timeout-minutes`     | No       | `45`                  | Max runtime in minutes                   |
-| `case`                | No       | `default`             | Case id embedded in trace filenames      |
+| Input                      | Required | Default               | Description                                                                  |
+| -------------------------- | -------- | --------------------- | ---------------------------------------------------------------------------- |
+| `task-text`                | Yes\*    | —                     | Inline task text                                                             |
+| `task-file`                | Yes\*    | —                     | Path to task file                                                            |
+| `mode`                     | No       | `run`                 | `run`, `supervise`, `facilitate`, or `discuss`                               |
+| `agent-model`              | No       | `claude-opus-4-7[1m]` | Claude model for agents                                                      |
+| `lead-model`               | No       | `claude-opus-4-7[1m]` | Claude model for the lead role (supervise / facilitate / discuss modes)      |
+| `max-turns`                | No       | `200`                 | Max turns (0 = unlimited)                                                    |
+| `lead-profile`             | No       | —                     | Lead role profile name (supervise / facilitate / discuss modes)              |
+| `agent-profile`            | No       | —                     | Agent profile name (run and supervise modes)                                 |
+| `agent-profiles`           | No       | —                     | Comma-separated participant profiles (facilitate and discuss modes)          |
+| `allowed-tools`            | No       | `Bash,Read,...`       | Comma-separated tool list for the agent                                      |
+| `supervisor-allowed-tools` | No       | —                     | Comma-separated tool list for the supervisor (supervise mode)                |
+| `task-amend`               | No       | —                     | Text appended to the task                                                    |
+| `mcp-server`               | No       | —                     | MCP service name (e.g. `guide`); adds `mcp__<name>__*` to allowed tools      |
+| `cwd`                      | No       | `.`                   | Agent working directory (run mode)                                           |
+| `supervisor-cwd`           | No       | `.`                   | Supervisor working directory (supervise mode)                                |
+| `agent-cwd`                | No       | `.`                   | Agent working directory (supervise / facilitate / discuss modes)             |
+| `discussion-id`            | No       | —                     | Stable id for the threaded discussion (discuss mode); enables resume         |
+| `resume-context`           | No       | —                     | JSON-serialized prior state for a resumed discuss run (discuss mode)         |
+| `trace`                    | No       | `true`                | Enable trace capture                                                         |
+| `timeout-minutes`          | No       | `45`                  | Max runtime in minutes                                                       |
+| `case`                     | No       | `default`             | Case id embedded in trace filenames                                          |
 
 \*Exactly one of `task-text` or `task-file` is required.
 
+### Lead role (`supervisor` / `facilitator` / `chair`)
+
+The lead's profile and model are controlled by a single pair of inputs across
+all three multi-agent modes:
+
+- `supervise` mode runs a supervisor + agent relay; the lead is the supervisor.
+- `facilitate` mode runs a facilitator + N participants; the lead is the
+  facilitator.
+- `discuss` mode runs a chair + N participants over a suspendable bridge; the
+  lead is the chair.
+
+In every case, set `lead-profile` to choose the lead's profile and `lead-model`
+to override the lead's model. The legacy `supervisor-profile`,
+`supervisor-model`, `facilitator-profile`, and `facilitator-model` inputs have
+been removed — pass `lead-*` instead.
+
+### Discuss mode
+
+`mode: discuss` runs an asynchronous, suspendable discussion. The chair drives
+the conversation and N participants respond via a bridge callback. Use
+`discussion-id` to correlate traces across resumed runs and `resume-context` to
+restore prior state when the caller resumes a suspended discussion.
+
+```yaml
+- uses: forwardimpact/fit-eval@v1
+  with:
+    mode: discuss
+    task-text: "…"
+    lead-profile: release-engineer
+    agent-profiles: product-manager,security-engineer,staff-engineer
+    discussion-id: GD_kw...
+```
+
 ## Outputs
 
-| Output       | Description                                                                                                                                    |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trace-dir`  | Absolute path of the mktemp directory holding the run's trace files (empty when `trace: false`).                                               |
-| `trace-file` | Absolute path of the raw NDJSON trace (`<trace-dir>/trace--<case>.raw.ndjson`); wraps each event in `{source, seq, event}`.                    |
-| `case`       | Effective case identifier (after resolving `case` / legacy `artifact-suffix`).                                                                 |
+| Output       | Description                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trace-dir`  | Absolute path of the mktemp directory holding the run's trace files (empty when `trace: false`).                                            |
+| `trace-file` | Absolute path of the raw NDJSON trace (`<trace-dir>/trace--<case>.raw.ndjson`); wraps each event in `{source, seq, event}`.                 |
+| `case`       | Effective case identifier (after resolving `case` / legacy `artifact-suffix`).                                                              |
 
 Downstream steps can read the raw trace directly — e.g. to extract the
 orchestrator summary and POST it to an external caller:
@@ -60,7 +100,7 @@ orchestrator summary and POST it to an external caller:
   with:
     mode: facilitate
     task-text: "…"
-    facilitator-profile: release-engineer
+    lead-profile: release-engineer
     agent-profiles: product-manager,security-engineer,staff-engineer
 
 - name: Deliver callback
@@ -84,9 +124,10 @@ When `trace` is enabled, the action uploads one artifact per run named
 | ------------------------------------------------- | ---------------------------------------------------------- | ---------------------- |
 | `trace--<case>.raw.ndjson`                        | Combined trace with `{source, seq, event}` envelopes       | All                    |
 | `trace--<case>--agent.agent.ndjson`               | Unwrapped agent events (run, supervise)                    | run, supervise         |
-| `trace--<case>--<profile>.agent.ndjson`           | Per-agent unwrapped events, one file per facilitate agent  | facilitate             |
+| `trace--<case>--<profile>.agent.ndjson`           | Per-agent unwrapped events, one file per participant       | facilitate, discuss    |
 | `trace--<case>--supervisor.supervisor.ndjson`     | Unwrapped supervisor events                                | supervise              |
 | `trace--<case>--facilitator.facilitator.ndjson`   | Unwrapped facilitator events                               | facilitate             |
+| `trace--<case>--chair.<role>.ndjson`              | Unwrapped chair events (split by envelope source)          | discuss                |
 
 `<case>` defaults to `default` for non-matrix runs; matrix workflows pass
 `case: ${{ matrix.<dim>.id }}` to disambiguate per-shard artifacts. The legacy

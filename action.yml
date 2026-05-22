@@ -9,7 +9,7 @@ inputs:
     description: Inline task text (mutually exclusive with task-file)
     required: false
   mode:
-    description: Execution mode — "run", "supervise", or "facilitate"
+    description: Execution mode — "run", "supervise", "facilitate", or "discuss"
     required: false
     default: "run"
   cwd:
@@ -21,19 +21,15 @@ inputs:
     required: false
     default: "."
   agent-cwd:
-    description: Agent working directory (for supervise and facilitate modes)
+    description: Agent working directory (for supervise, facilitate, and discuss modes)
     required: false
     default: "."
   agent-model:
     description: Claude model for agents (all modes)
     required: false
     default: "claude-opus-4-7[1m]"
-  supervisor-model:
-    description: Claude model for the supervisor (supervise mode)
-    required: false
-    default: "claude-opus-4-7[1m]"
-  facilitator-model:
-    description: Claude model for the facilitator (facilitate mode)
+  lead-model:
+    description: Claude model for the lead role (supervisor / facilitator / chair) — used by supervise, facilitate, and discuss modes
     required: false
     default: "claude-opus-4-7[1m]"
   max-turns:
@@ -47,23 +43,26 @@ inputs:
   supervisor-allowed-tools:
     description: Comma-separated list of allowed tools for the supervisor (supervise mode only)
     required: false
-  supervisor-profile:
-    description: Supervisor agent profile name (supervise mode only)
+  lead-profile:
+    description: Lead role profile name (supervisor / facilitator / chair) — used by supervise, facilitate, and discuss modes
     required: false
   agent-profile:
     description: Agent profile name (run and supervise modes)
     required: false
-  facilitator-profile:
-    description: Facilitator profile name (facilitate mode only)
-    required: false
   agent-profiles:
-    description: Comma-separated agent profile names for facilitate mode
+    description: Comma-separated agent profile names (facilitate and discuss modes)
     required: false
   task-amend:
     description: Additional text appended to the task prompt for steering
     required: false
   mcp-server:
     description: "MCP service name to connect to (e.g. guide); adds mcp__<name>__* to allowed tools"
+    required: false
+  discussion-id:
+    description: Stable id for the threaded discussion (discuss mode); carried through traces for linking and used by callers to resume a suspended run
+    required: false
+  resume-context:
+    description: JSON-serialized prior state for a resumed discuss run (discuss mode)
     required: false
   trace:
     description: Enable trace capture and artifact upload
@@ -94,10 +93,10 @@ outputs:
     description: |
       Absolute path of the raw NDJSON trace file
       (`<trace-dir>/trace--<case>.raw.ndjson`). Empty when `trace` is
-      disabled. Wraps each agent/supervisor/facilitator/orchestrator event
-      in `{source, seq, event}` envelopes; downstream tooling that needs
-      the structured envelope (e.g. extracting the orchestrator summary)
-      should read this path directly.
+      disabled. Wraps each agent/supervisor/facilitator/chair/orchestrator
+      event in `{source, seq, event}` envelopes; downstream tooling that
+      needs the structured envelope (e.g. extracting the orchestrator
+      summary) should read this path directly.
     value: ${{ steps.setup.outputs.trace-file }}
   case:
     description: Effective case identifier (after resolving `case` / legacy `artifact-suffix`).
@@ -143,17 +142,17 @@ runs:
         SUPERVISOR_CWD: ${{ inputs.supervisor-cwd }}
         AGENT_CWD: ${{ inputs.agent-cwd }}
         AGENT_MODEL: ${{ inputs.agent-model }}
-        SUPERVISOR_MODEL: ${{ inputs.supervisor-model }}
-        FACILITATOR_MODEL: ${{ inputs.facilitator-model }}
+        LEAD_MODEL: ${{ inputs.lead-model }}
         MAX_TURNS: ${{ inputs.max-turns }}
         TOOLS: ${{ inputs.allowed-tools }}
         SUPERVISOR_TOOLS: ${{ inputs.supervisor-allowed-tools }}
-        SUPERVISOR_PROFILE: ${{ inputs.supervisor-profile }}
+        LEAD_PROFILE: ${{ inputs.lead-profile }}
         AGENT_PROFILE: ${{ inputs.agent-profile }}
-        FACILITATOR_PROFILE: ${{ inputs.facilitator-profile }}
         AGENT_PROFILES: ${{ inputs.agent-profiles }}
         TASK_AMEND: ${{ inputs.task-amend }}
         MCP_SERVER: ${{ inputs.mcp-server }}
+        DISCUSSION_ID: ${{ inputs.discussion-id }}
+        RESUME_CONTEXT: ${{ inputs.resume-context }}
         TRACE_ENABLED: ${{ inputs.trace }}
         TRACE_DIR: ${{ steps.setup.outputs.trace-dir }}
         TRACE_CASE: ${{ steps.setup.outputs.case }}
@@ -202,9 +201,9 @@ runs:
         args+=("--agent-model=$AGENT_MODEL")
 
         if [ "$MODE" = "supervise" ]; then
-          args+=("--supervisor-model=$SUPERVISOR_MODEL")
-          if [ -n "$SUPERVISOR_PROFILE" ]; then
-            args+=("--supervisor-profile=$SUPERVISOR_PROFILE")
+          args+=("--lead-model=$LEAD_MODEL")
+          if [ -n "$LEAD_PROFILE" ]; then
+            args+=("--lead-profile=$LEAD_PROFILE")
           fi
           if [ -n "$SUPERVISOR_TOOLS" ]; then
             args+=("--supervisor-allowed-tools=$SUPERVISOR_TOOLS")
@@ -221,14 +220,32 @@ runs:
             --allowed-tools="$TOOLS" \
             "${args[@]}"
         elif [ "$MODE" = "facilitate" ]; then
-          args+=("--facilitator-model=$FACILITATOR_MODEL")
-          if [ -n "$FACILITATOR_PROFILE" ]; then
-            args+=("--facilitator-profile=$FACILITATOR_PROFILE")
+          args+=("--lead-model=$LEAD_MODEL")
+          if [ -n "$LEAD_PROFILE" ]; then
+            args+=("--lead-profile=$LEAD_PROFILE")
           fi
 
           timeout "${TIMEOUT_MINUTES}m" $EVAL_CMD facilitate \
             --facilitator-cwd="." \
             --agent-profiles="$AGENT_PROFILES" \
+            --agent-cwd="$AGENT_CWD" \
+            "${args[@]}"
+        elif [ "$MODE" = "discuss" ]; then
+          args+=("--lead-model=$LEAD_MODEL")
+          if [ -n "$LEAD_PROFILE" ]; then
+            args+=("--lead-profile=$LEAD_PROFILE")
+          fi
+          if [ -n "$AGENT_PROFILES" ]; then
+            args+=("--agent-profiles=$AGENT_PROFILES")
+          fi
+          if [ -n "$DISCUSSION_ID" ]; then
+            args+=("--discussion-id=$DISCUSSION_ID")
+          fi
+          if [ -n "$RESUME_CONTEXT" ]; then
+            args+=("--resume-context=$RESUME_CONTEXT")
+          fi
+
+          timeout "${TIMEOUT_MINUTES}m" $EVAL_CMD discuss \
             --agent-cwd="$AGENT_CWD" \
             "${args[@]}"
         else
@@ -257,8 +274,16 @@ runs:
         else
           TRACE_CMD="npx --yes @forwardimpact/libeval fit-trace"
         fi
+        # `fit-trace split` only accepts run|supervise|facilitate today, but
+        # the splitter itself is mode-agnostic (it buckets by envelope
+        # `source`). Discuss runs have the same lead + N-participants shape
+        # as facilitate, so map them onto `facilitate` for the splitter.
+        SPLIT_MODE="$MODE"
+        if [ "$SPLIT_MODE" = "discuss" ]; then
+          SPLIT_MODE="facilitate"
+        fi
         $TRACE_CMD split "$TRACE_DIR/trace--${TRACE_CASE}.raw.ndjson" \
-          --mode="$MODE" \
+          --mode="$SPLIT_MODE" \
           --case="$TRACE_CASE" \
           --output-dir="$TRACE_DIR"
 
