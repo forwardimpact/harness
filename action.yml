@@ -10,7 +10,7 @@ inputs:
     required: false
   task-event:
     description: |
-      Path to a native GitHub event payload JSON (typically `${{ github.event_path }}`).
+      Path to a native GitHub event payload JSON (typically github.event_path).
       The CLI composes the task from the payload using the (event_name, action)
       template that matches `$GITHUB_EVENT_NAME`, and lifts `payload.inputs.prompt`
       into the task amendment. Mutually exclusive with task-file / task-text.
