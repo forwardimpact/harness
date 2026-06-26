@@ -1,13 +1,13 @@
-# Kata Eval
+# Kata Harness
 
 Run agent tasks via the
-[fit-eval](https://www.npmjs.com/package/@forwardimpact/libeval) CLI using the
+[fit-harness](https://www.npmjs.com/package/@forwardimpact/libharness) CLI using the
 Claude Agent SDK. Handles trace capture, splitting, and artifact upload.
 
 ## Usage
 
 ```yaml
-- uses: forwardimpact/fit-eval@v1
+- uses: forwardimpact/fit-harness@v1
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     GH_TOKEN: ${{ steps.ci-app.outputs.token }}
@@ -19,7 +19,7 @@ Claude Agent SDK. Handles trace capture, splitting, and artifact upload.
 ## Prerequisites
 
 - Node.js 18+ or Bun 1.2+
-- `@forwardimpact/libeval` installed (via `npm install` or in a Bun workspace)
+- `@forwardimpact/libharness` installed (via `npm install` or in a Bun workspace)
 - `ANTHROPIC_API_KEY` and `GH_TOKEN` set as environment variables
 
 ## Inputs
@@ -74,7 +74,7 @@ the conversation and N participants respond via a bridge callback. Use
 restore prior state when the caller resumes a suspended discussion.
 
 ```yaml
-- uses: forwardimpact/fit-eval@v1
+- uses: forwardimpact/fit-harness@v1
   with:
     mode: discuss
     task-text: "…"
@@ -96,7 +96,7 @@ orchestrator summary and POST it to an external caller:
 
 ```yaml
 - id: assess
-  uses: forwardimpact/fit-eval@v1
+  uses: forwardimpact/fit-harness@v1
   with:
     mode: facilitate
     task-text: "…"
@@ -108,7 +108,7 @@ orchestrator summary and POST it to an external caller:
   env:
     TRACE_FILE: ${{ steps.assess.outputs.trace-file }}
   run: |
-    node libraries/libeval/bin/fit-eval.js callback \
+    node libraries/libharness/bin/fit-harness.js callback \
       --trace-file="$TRACE_FILE" \
       --callback-url="$CALLBACK_URL" \
       --correlation-id="$CORRELATION_ID"
@@ -135,20 +135,20 @@ When `trace` is enabled, the action uploads one artifact per run named
 
 ## Trace redaction
 
-The underlying `fit-eval` CLI redacts secrets in trace artifacts before they
+The underlying `fit-harness` CLI redacts secrets in trace artifacts before they
 reach disk. Two layers compose:
 
 - **Env-var allowlist**, defaulting to `ANTHROPIC_API_KEY`, `GH_TOKEN`,
   `GITHUB_TOKEN`. The runtime values of these vars are replaced with
   `[REDACTED:env:NAME]` wherever they appear in tool inputs, tool outputs,
   assistant text, or orchestrator summaries. Override the list with
-  `LIBEVAL_REDACTION_ENV_VARS=NAME1,NAME2,…` (replaces, not extends).
+  `LIBHARNESS_REDACTION_ENV_VARS=NAME1,NAME2,…` (replaces, not extends).
 - **Credential-shape patterns**, covering Anthropic API keys (`sk-ant-`),
   GitHub PATs (`ghp_`), installation tokens (`ghs_`), OAuth tokens (`gho_`),
   and fine-grained PATs (`github_pat_`). Pattern hits become
   `[REDACTED:pattern:KIND]`.
 
-Redaction is on by default. To disable, set `LIBEVAL_REDACTION_DISABLED=1` in
+Redaction is on by default. To disable, set `LIBHARNESS_REDACTION_DISABLED=1` in
 the workflow `env:` block — a stderr warning fires once per run. Setting this
 in workflow YAML is reviewable in the PR diff and is **prohibited on
 public-repo CI**: workflow artifacts there are downloadable through the

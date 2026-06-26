@@ -1,5 +1,5 @@
-name: FIT Eval
-description: Run agent tasks via the fit-eval CLI using the Claude Agent SDK
+name: FIT Harness
+description: Run agent tasks via the fit-harness CLI using the Claude Agent SDK
 
 inputs:
   task-file:
@@ -32,11 +32,11 @@ inputs:
     required: false
     default: "."
   agent-model:
-    description: Claude model for agents (all modes); empty uses the fit-eval CLI default
+    description: Claude model for agents (all modes); empty uses the fit-harness CLI default
     required: false
     default: ""
   lead-model:
-    description: Claude model for the lead role (supervisor / facilitator / chair) — used by supervise, facilitate, and discuss modes; empty uses the fit-eval CLI default
+    description: Claude model for the lead role (supervisor / facilitator / chair) — used by supervise, facilitate, and discuss modes; empty uses the fit-harness CLI default
     required: false
     default: ""
   max-turns:
@@ -136,10 +136,10 @@ runs:
         echo "case=$EFFECTIVE_CASE" >> "$GITHUB_OUTPUT"
         # Publish the raw trace file path so downstream steps can read it
         # without globbing /tmp. Kept in sync with the --output path passed
-        # to the CLI in the "Run fit-eval" step below.
+        # to the CLI in the "Run fit-harness" step below.
         echo "trace-file=$TRACE_DIR/trace--$EFFECTIVE_CASE.raw.ndjson" >> "$GITHUB_OUTPUT"
 
-    - name: Run fit-eval
+    - name: Run fit-harness
       shell: bash
       env:
         # The agent runs in bypass-permissions mode
@@ -174,23 +174,23 @@ runs:
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
       run: |
         # Resolve CLI — prefer a local install, else resolve from the registry.
-        # fit-eval/fit-trace are bins of @forwardimpact/libeval, NOT standalone
-        # packages, so `bunx fit-eval` / `npx fit-eval` 404 against the registry.
+        # fit-harness/fit-trace are bins of @forwardimpact/libharness, NOT standalone
+        # packages, so `bunx fit-harness` / `npx fit-harness` 404 against the registry.
         # The package must be named explicitly with --package and the bin given
         # as the command (bare `bunx <pkg> <bin>` runs the package's default bin).
-        if command -v fit-eval &>/dev/null; then
-          EVAL_CMD="fit-eval"
+        if command -v fit-harness &>/dev/null; then
+          HARNESS_CMD="fit-harness"
         elif command -v bunx &>/dev/null; then
-          EVAL_CMD="bunx --package=@forwardimpact/libeval fit-eval"
+          HARNESS_CMD="bunx --package=@forwardimpact/libharness fit-harness"
         else
-          EVAL_CMD="npx --yes --package=@forwardimpact/libeval fit-eval"
+          HARNESS_CMD="npx --yes --package=@forwardimpact/libharness fit-harness"
         fi
 
         args=()
 
         # Resolve task source — exactly one of task-file, task-text, task-event
         # is required. task-event hands the runner's native event JSON to the
-        # CLI; libeval composes the task from the (event_name, action) template
+        # CLI; libharness composes the task from the (event_name, action) template
         # and lifts payload.inputs.prompt into the amendment.
         task_sources=0
         [ -n "$TASK_FILE" ] && task_sources=$((task_sources + 1))
@@ -251,7 +251,7 @@ runs:
 
           # Composite action steps can't use the GitHub `timeout-minutes`
           # field, so enforce the cap with the shell `timeout` command.
-          timeout "${TIMEOUT_MINUTES}m" $EVAL_CMD supervise \
+          timeout "${TIMEOUT_MINUTES}m" $HARNESS_CMD supervise \
             --supervisor-cwd="$SUPERVISOR_CWD" \
             --agent-cwd="$AGENT_CWD" \
             --allowed-tools="$TOOLS" \
@@ -264,7 +264,7 @@ runs:
             args+=("--lead-profile=$LEAD_PROFILE")
           fi
 
-          timeout "${TIMEOUT_MINUTES}m" $EVAL_CMD facilitate \
+          timeout "${TIMEOUT_MINUTES}m" $HARNESS_CMD facilitate \
             --facilitator-cwd="." \
             --agent-profiles="$AGENT_PROFILES" \
             --agent-cwd="$AGENT_CWD" \
@@ -286,7 +286,7 @@ runs:
             args+=("--resume-context=$RESUME_CONTEXT")
           fi
 
-          timeout "${TIMEOUT_MINUTES}m" $EVAL_CMD discuss \
+          timeout "${TIMEOUT_MINUTES}m" $HARNESS_CMD discuss \
             --agent-cwd="$AGENT_CWD" \
             "${args[@]}"
         else
@@ -294,7 +294,7 @@ runs:
             args+=("--agent-profile=$AGENT_PROFILE")
           fi
 
-          timeout "${TIMEOUT_MINUTES}m" $EVAL_CMD run \
+          timeout "${TIMEOUT_MINUTES}m" $HARNESS_CMD run \
             --cwd="$CWD" \
             --allowed-tools="$TOOLS" \
             "${args[@]}"
@@ -311,9 +311,9 @@ runs:
         if command -v fit-trace &>/dev/null; then
           TRACE_CMD="fit-trace"
         elif command -v bunx &>/dev/null; then
-          TRACE_CMD="bunx --package=@forwardimpact/libeval fit-trace"
+          TRACE_CMD="bunx --package=@forwardimpact/libharness fit-trace"
         else
-          TRACE_CMD="npx --yes --package=@forwardimpact/libeval fit-trace"
+          TRACE_CMD="npx --yes --package=@forwardimpact/libharness fit-trace"
         fi
         # `fit-trace split` only accepts run|supervise|facilitate today, but
         # the splitter itself is mode-agnostic (it buckets by envelope
