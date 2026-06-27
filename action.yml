@@ -173,18 +173,16 @@ runs:
         TRACE_CASE: ${{ steps.setup.outputs.case }}
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
       run: |
-        # Resolve CLI — prefer a local install, else resolve from the registry.
-        # fit-harness/fit-trace are bins of @forwardimpact/libharness, NOT standalone
-        # packages, so `bunx fit-harness` / `npx fit-harness` 404 against the registry.
-        # The package must be named explicitly with --package and the bin given
-        # as the command (bare `bunx <pkg> <bin>` runs the package's default bin).
-        if command -v fit-harness &>/dev/null; then
-          HARNESS_CMD="fit-harness"
-        elif command -v bunx &>/dev/null; then
-          HARNESS_CMD="bunx --package=@forwardimpact/libharness fit-harness"
-        else
-          HARNESS_CMD="npx --yes --package=@forwardimpact/libharness fit-harness"
+        # fit-harness must already be on PATH as a pinned gear binary, installed
+        # by forwardimpact/fit-bootstrap with `clis: fit-harness fit-trace`.
+        # There is no bunx/npx fallback: the binary distribution is the only
+        # supported path, so a missing binary fails hard rather than silently
+        # resolving a different (registry) build.
+        if ! command -v fit-harness &>/dev/null; then
+          echo "::error::fit-harness not found on PATH. Install it as a gear binary via forwardimpact/fit-bootstrap with 'clis: fit-harness fit-trace' before this step. No bunx/npx fallback." >&2
+          exit 1
         fi
+        HARNESS_CMD="fit-harness"
 
         args=()
 
@@ -308,13 +306,13 @@ runs:
         MODE: ${{ inputs.mode }}
         TRACE_CASE: ${{ steps.setup.outputs.case }}
       run: |
-        if command -v fit-trace &>/dev/null; then
-          TRACE_CMD="fit-trace"
-        elif command -v bunx &>/dev/null; then
-          TRACE_CMD="bunx --package=@forwardimpact/libharness fit-trace"
-        else
-          TRACE_CMD="npx --yes --package=@forwardimpact/libharness fit-trace"
+        # fit-trace is a pinned gear binary on PATH (fit-bootstrap clis:
+        # fit-trace). No bunx/npx fallback — fail hard if it is missing.
+        if ! command -v fit-trace &>/dev/null; then
+          echo "::error::fit-trace not found on PATH. Install it as a gear binary via forwardimpact/fit-bootstrap with 'clis: fit-trace' before this step. No bunx/npx fallback." >&2
+          exit 1
         fi
+        TRACE_CMD="fit-trace"
         # `fit-trace split` only accepts run|supervise|facilitate today, but
         # the splitter itself is mode-agnostic (it buckets by envelope
         # `source`). Discuss runs have the same lead + N-participants shape
